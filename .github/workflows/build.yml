@@ -1,0 +1,41 @@
+name: Build APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y openjdk-17-jdk python3-pip build-essential git python3-dev zlib1g-dev
+          pip install buildozer
+      - name: Build APK
+        run: |
+          cat > buildozer.spec << 'SPEC'
+          [app]
+          title = Klayines
+          package.name = klayines
+          package.domain = com.klayines
+          source.dir = .
+          source.include_exts = py
+          version = 1.0
+          requirements = python3,flask,requests
+          orientation = portrait
+          android.permissions = INTERNET
+          android.arch = arm64-v8a
+          android.api = 31
+          android.minapi = 21
+          p4a.branch = master
+          android.accept_sdk_license = True
+          SPEC
+          buildozer android debug
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: Klayines-APK
+          path: bin/*.apk
