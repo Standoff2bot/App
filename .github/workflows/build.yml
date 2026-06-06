@@ -11,23 +11,41 @@ jobs:
         with:
           python-version: '3.10'
       
-      - name: Install Briefcase
+      - name: Install System Dependencies
         run: |
-          pip install briefcase
           sudo apt update
-          sudo apt install -y openjdk-17-jdk
+          sudo apt install -y openjdk-17-jdk python3-pip
+          pip install briefcase
       
-      - name: Create Android project
+      - name: Create project structure
         run: |
-          briefcase new
-          # Выбираем Web проект
+          mkdir -p Klayines/src/Klayines
+          cp main.py Klayines/src/Klayines/
           
-      - name: Build APK
+          cat > Klayines/pyproject.toml << 'EOF'
+          [project]
+          name = "Klayines"
+          version = "1.0"
+          
+          [build-system]
+          requires = ["briefcase"]
+          
+          [tool.briefcase]
+          project_name = "Klayines"
+          bundle = "com.klayines"
+          
+          [tool.briefcase.app.Klayines]
+          formal_name = "Klayines"
+          requires = ["flask", "requests"]
+          sources = ["src/Klayines"]
+          EOF
+      
+      - name: Build Android
         run: |
           cd Klayines
-          briefcase create android
-          briefcase build android
-          briefcase package android
+          echo "y" | briefcase create android
+          echo "y" | briefcase build android
+          echo "y" | briefcase package android
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
