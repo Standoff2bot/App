@@ -10,9 +10,6 @@ bundle = "com.klayines"
 
 [tool.briefcase.app.Klayines]
 formal_name = "Klayines"
-description = "P2P Messenger via Tor bridges"
-sources = ["."]
-requires = ["toga", "flask", "requests", "pysocks"]
-
-[tool.briefcase.app.Klayines.android]
-runtime_version = "3.10"
+description = "P2P Messenger"
+sources = ["src/Klayines"]
+requires = ["flask", "requests"]
