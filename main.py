@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Klayines - P2P Messenger (WebView версия)
+Klayines - P2P Messenger APK
 """
 import hashlib
 import socket
@@ -10,17 +10,27 @@ import threading
 import os
 import random
 import requests
-from flask import Flask, render_template_string, request, jsonify
+
+# Для Android WebView
+try:
+    from android.webview import WebView
+    from android.runnable import run_on_ui_thread
+    ON_ANDROID = True
+except ImportError:
+    ON_ANDROID = False
 
 SERVER_URL = "https://p2p-epg6.onrender.com"
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "klayines_config.json")
 
-app = Flask(__name__)
+# Сохраняем ID на SD-карту
+try:
+    CONFIG_FILE = "/sdcard/klayines_id.json"
+except:
+    CONFIG_FILE = "klayines_id.json"
+
 my_id = None
-nickname = ""
 messages_list = []
 
-HTML_TEMPLATE = '''
+HTML = '''
 <!DOCTYPE html>
 <html>
 <head>
@@ -29,229 +39,157 @@ HTML_TEMPLATE = '''
     <title>Klayines</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            background: #0a0a0a;
-            color: #00ff00;
-            font-family: monospace;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        #header {
-            background: #111;
-            padding: 10px;
-            text-align: center;
-            border-bottom: 2px solid #00ff00;
-        }
-        #id-text { color: #00ffff; font-size: 12px; }
-        #chat {
-            flex: 1;
-            overflow-y: auto;
-            padding: 10px;
-            background: #000;
-        }
-        .msg-in { color: #ffff00; margin: 5px 0; }
-        .msg-out { color: #00ffff; margin: 5px 0; }
-        .msg-time { color: #666; font-size: 10px; }
-        #input-area {
-            background: #111;
-            padding: 10px;
-            border-top: 2px solid #00ff00;
-        }
-        input {
-            width: 100%;
-            padding: 10px;
-            margin: 5px 0;
-            background: #222;
-            border: 1px solid #00ff00;
-            color: #00ff00;
-            font-family: monospace;
-            font-size: 14px;
-        }
-        button {
-            width: 100%;
-            padding: 12px;
-            background: #003300;
-            border: 2px solid #00ff00;
-            color: #00ff00;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-            margin: 3px 0;
-        }
-        button:active { background: #005500; }
-        #users-btn { background: #1a1a3a; border-color: #4444ff; color: #8888ff; }
+        body { background: #000; color: #0f0; font-family: monospace; height: 100vh; display: flex; flex-direction: column; }
+        #header { background: #111; padding: 15px; text-align: center; border-bottom: 2px solid #0f0; }
+        #header h2 { color: #0ff; font-size: 20px; }
+        #id-text { color: #0f0; font-size: 12px; margin-top: 5px; }
+        #chat { flex: 1; overflow-y: auto; padding: 10px; }
+        .msg { margin: 8px 0; padding: 8px; border-radius: 5px; }
+        .msg-in { background: #1a1a00; color: #ff0; border-left: 3px solid #ff0; }
+        .msg-out { background: #001a1a; color: #0ff; border-left: 3px solid #0ff; }
+        .time { color: #666; font-size: 10px; }
+        #input-area { background: #111; padding: 10px; border-top: 2px solid #0f0; }
+        input { width: 100%; padding: 12px; margin: 5px 0; background: #222; border: 1px solid #0f0; color: #0f0; font-size: 16px; border-radius: 5px; }
+        button { width: 100%; padding: 14px; margin: 5px 0; border: none; font-size: 16px; font-weight: bold; border-radius: 5px; cursor: pointer; }
+        .btn-send { background: #0f0; color: #000; }
+        .btn-online { background: #44f; color: #fff; }
+        button:active { opacity: 0.7; }
     </style>
 </head>
 <body>
     <div id="header">
-        <h2>⚡ KLAYINES v1.0</h2>
-        <p id="id-text">ID: {{ my_id }}</p>
+        <h2>⚡ KLAYINES</h2>
+        <div id="id-text">ID: LOADING...</div>
     </div>
-    
-    <div id="chat">
-        {% for msg in messages %}
-            <div class="{{ 'msg-out' if msg.type == 'out' else 'msg-in' }}">
-                <span class="msg-time">{{ msg.time }}</span>
-                <b>{{ msg.sender }}</b>: {{ msg.text }}
-            </div>
-        {% endfor %}
-    </div>
-    
+    <div id="chat"></div>
     <div id="input-area">
         <input type="text" id="target" placeholder="Target ID">
         <input type="text" id="message" placeholder="Message...">
-        <button onclick="sendMessage()">[ SEND ]</button>
-        <button id="users-btn" onclick="showOnline()">[ ONLINE USERS ]</button>
+        <button class="btn-send" onclick="send()">[ SEND ]</button>
+        <button class="btn-online" onclick="online()">[ ONLINE USERS ]</button>
     </div>
-    
     <script>
-        function sendMessage() {
+        const SERVER = 'SERVER_URL_PLACEHOLDER';
+        let myId = localStorage.getItem('klayines_id');
+        
+        if (!myId) {
+            fetch('MY_ID_PLACEHOLDER')
+                .then(r => r.text())
+                .then(id => {
+                    myId = id;
+                    localStorage.setItem('klayines_id', id);
+                    document.getElementById('id-text').textContent = 'ID: ' + id;
+                });
+        } else {
+            document.getElementById('id-text').textContent = 'ID: ' + myId;
+        }
+        
+        function send() {
             const target = document.getElementById('target').value.trim();
             const text = document.getElementById('message').value.trim();
             if (!target || !text) return;
             
-            fetch('/send', {
+            fetch(SERVER + '/send', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({target: target, text: text})
+                body: JSON.stringify({from: myId, to: target, text: text})
             })
             .then(r => r.json())
-            .then(data => {
-                if (data.status === 'ok') {
+            .then(d => {
+                if (d.status === 'sent') {
                     document.getElementById('message').value = '';
-                    loadMessages();
+                    addMsg('You', text, 'out');
                 } else {
-                    alert('Error: ' + data.error);
+                    alert(d.error || 'Error');
                 }
+            })
+            .catch(() => alert('Network error'));
+        }
+        
+        function online() {
+            fetch(SERVER + '/online')
+                .then(r => r.json())
+                .then(d => alert('Online (' + d.length + '):\n' + (d.join('\n') || 'none')))
+                .catch(() => alert('Server unreachable'));
+        }
+        
+        function addMsg(sender, text, type) {
+            const chat = document.getElementById('chat');
+            const time = new Date().toLocaleTimeString();
+            chat.innerHTML += 
+                '<div class="msg msg-' + type + '">' +
+                '<span class="time">' + time + '</span><br>' +
+                '<b>' + sender + '</b>: ' + text +
+                '</div>';
+            chat.scrollTop = chat.scrollHeight;
+        }
+        
+        function check() {
+            fetch(SERVER + '/check', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: myId})
+            })
+            .then(r => r.json())
+            .then(d => {
+                (d.messages || []).forEach(m => addMsg(m.from, m.text, 'in'));
             });
         }
         
-        function showOnline() {
-            fetch('/online')
-                .then(r => r.json())
-                .then(data => {
-                    const users = data.users || [];
-                    alert('Online (' + users.length + '):\\n' + users.join('\\n'));
-                });
-        }
+        // Пинг
+        setInterval(() => {
+            fetch(SERVER + '/ping', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: myId})
+            });
+        }, 30000);
         
-        function loadMessages() {
-            fetch('/messages')
-                .then(r => r.json())
-                .then(data => {
-                    const chat = document.getElementById('chat');
-                    chat.innerHTML = data.messages.map(msg => 
-                        '<div class="' + (msg.type === 'out' ? 'msg-out' : 'msg-in') + '">' +
-                        '<span class="msg-time">' + msg.time + '</span> ' +
-                        '<b>' + msg.sender + '</b>: ' + msg.text +
-                        '</div>'
-                    ).join('');
-                    chat.scrollTop = chat.scrollHeight;
-                });
-        }
-        
-        // Обновление каждые 2 секунды
-        setInterval(loadMessages, 2000);
-        loadMessages();
+        setInterval(check, 2000);
+        check();
     </script>
 </body>
 </html>
 '''
 
-def generate_id():
+def gen_id():
     hostname = socket.gethostname()
     unique = f"{hostname}_{random.randint(10000, 99999)}_{time.time()}"
     return hashlib.sha256(unique.encode()).hexdigest()[:8]
 
-def load_or_create_id():
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
-            config = json.load(f)
-            return config.get("id", generate_id())
-    new_id = generate_id()
-    with open(CONFIG_FILE, "w") as f:
-        json.dump({"id": new_id}, f)
-    return new_id
-
-def ping_loop():
-    while True:
-        try:
-            requests.post(f"{SERVER_URL}/ping", json={"id": my_id}, timeout=10)
-        except:
-            pass
-        time.sleep(30)
-
-def check_loop():
-    while True:
-        try:
-            resp = requests.post(f"{SERVER_URL}/check", json={"id": my_id}, timeout=5)
-            if resp.status_code == 200:
-                for msg in resp.json().get("messages", []):
-                    sender = msg.get("from_nick", msg.get("from"))
-                    text = msg.get("text")
-                    tm = msg.get("time", "")
-                    messages_list.append({
-                        "type": "in",
-                        "sender": sender,
-                        "text": text,
-                        "time": tm
-                    })
-        except:
-            pass
-        time.sleep(2)
-
-@app.route('/')
-def index():
-    return render_template_string(HTML_TEMPLATE, my_id=my_id, messages=messages_list[-20:])
-
-@app.route('/messages')
-def get_messages():
-    return jsonify({"messages": messages_list[-50:]})
-
-@app.route('/send', methods=['POST'])
-def send():
-    data = request.json
-    target = data.get('target')
-    text = data.get('text')
-    
-    if not target or not text:
-        return jsonify({"status": "error", "error": "Missing fields"})
-    
+def load_id():
     try:
-        resp = requests.post(
-            f"{SERVER_URL}/send",
-            json={"from": my_id, "to": target, "text": text},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            messages_list.append({
-                "type": "out",
-                "sender": "Me",
-                "text": text,
-                "time": time.strftime("%H:%M:%S")
-            })
-            return jsonify({"status": "ok"})
-        return jsonify({"status": "error", "error": resp.json().get("error", "Failed")})
-    except Exception as e:
-        return jsonify({"status": "error", "error": str(e)})
-
-@app.route('/online')
-def online():
-    try:
-        resp = requests.get(f"{SERVER_URL}/online", timeout=10)
-        if resp.status_code == 200:
-            return jsonify({"users": resp.json()})
+        with open(CONFIG_FILE) as f:
+            return json.load(f)["id"]
     except:
-        pass
-    return jsonify({"users": []})
+        new_id = gen_id()
+        try:
+            with open(CONFIG_FILE, "w") as f:
+                json.dump({"id": new_id}, f)
+        except:
+            pass
+        return new_id
 
 if __name__ == '__main__':
-    my_id = load_or_create_id()
+    my_id = load_id()
     
-    threading.Thread(target=ping_loop, daemon=True).start()
-    threading.Thread(target=check_loop, daemon=True).start()
+    # Заменяем URL в HTML
+    html_content = HTML.replace('SERVER_URL_PLACEHOLDER', SERVER_URL)
+    html_content = html_content.replace('MY_ID_PLACEHOLDER', my_id)
     
-    print(f"Klayines running on http://localhost:5000")
-    print(f"Your ID: {my_id}")
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    if ON_ANDROID:
+        # Запускаем в Android WebView
+        @run_on_ui_thread
+        def show_webview():
+            webview = WebView()
+            webview.load_html(html_content)
+            webview.show()
+        
+        show_webview()
+    else:
+        # Для тестов на ПК — сохраняем HTML
+        with open('klayines.html', 'w') as f:
+            f.write(html_content)
+        print(f"HTML saved to klayines.html")
+        print(f"Your ID: {my_id}")
+        print(f"Open in browser or serve with: python -m http.server")
