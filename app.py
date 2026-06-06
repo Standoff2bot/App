@@ -1,16 +1,16 @@
-#!/usr/bin/env python3
-"""
-Klayines APK – P2P Messenger (WebView + Tor Bridges)
-"""
-import os, sys, time, threading, json, hashlib, socket, random, subprocess, requests
+import os, sys, time, threading, hashlib, socket, random, json, subprocess
+import requests
+import toga
+from toga.style import Pack
+from toga.style.pack import COLUMN
 from flask import Flask, render_template_string, request, jsonify
 
 # ---------- НАСТРОЙКИ ----------
 SERVER_URL = "https://p2p-epg6.onrender.com"
-CONFIG_FILE = "/sdcard/klayines_id.json"
-BRIDGES_FILE = "/data/data/com.termux/files/home/.klayines_bridges.txt"
-TORRC_FILE   = "/data/data/com.termux/files/home/.klayines_torrc"
-HS_DIR       = "/data/data/com.termux/files/home/.klayines_hidden_service"
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "klayines_id.json")
+BRIDGES_FILE = os.path.expanduser("~/.klayines_bridges.txt")
+TORRC_FILE   = os.path.expanduser("~/.klayines_torrc")
+HS_DIR       = os.path.expanduser("~/.klayines_hidden_service")
 # -------------------------------
 
 # ==================== Tor Bridges Mode ====================
@@ -121,8 +121,8 @@ class TorBridgesMode:
             return (True, None) if self.net.send(target, text, nick) else (False, "fail")
         return (False, "offline")
 
-# ==================== WebView + Flask ====================
-app = Flask(__name__)
+# ==================== Flask Web App ====================
+flask_app = Flask(__name__)
 my_id = None
 nickname = ""
 active_mode = None
@@ -172,22 +172,22 @@ setInterval(load,2000);load()
 </script>
 </body></html>"""
 
-@app.route('/')
+@flask_app.route('/')
 def index():
     return render_template_string(HTML)
 
-@app.route('/myid')
+@flask_app.route('/myid')
 def myid():
     return my_id or "???"
 
-@app.route('/messages')
+@flask_app.route('/messages')
 def messages():
     if active_mode:
         for m in active_mode.check():
             chat.append(m)
     return jsonify(chat[-50:])
 
-@app.route('/send', methods=['POST'])
+@flask_app.route('/send', methods=['POST'])
 def send():
     data = request.json
     target = data.get('target','').strip()
@@ -199,7 +199,6 @@ def send():
         chat.append({"from":"You","text":text})
     return jsonify({"ok":ok})
 
-# ==================== main ====================
 def load_or_create_id():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE) as f:
@@ -212,7 +211,19 @@ def load_or_create_id():
         json.dump({"id":new_id}, f)
     return new_id
 
-if __name__ == '__main__':
+# ==================== Toga App (WebView) ====================
+class KlayinesApp(toga.App):
+    def startup(self):
+        self.webview = toga.WebView(
+            url='http://localhost:5000',
+            style=Pack(flex=1)
+        )
+        self.main_window = toga.MainWindow(title="Klayines")
+        self.main_window.content = self.webview
+        self.main_window.show()
+
+def start_flask():
+    global my_id, active_mode
     my_id = load_or_create_id()
     try:
         active_mode = TorBridgesMode()
@@ -220,4 +231,12 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"Tor error: {e}")
         sys.exit(1)
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    flask_app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+
+def main():
+    # Запускаем Flask в фоне
+    threading.Thread(target=start_flask, daemon=True).start()
+    time.sleep(2)
+    # Запускаем Toga интерфейс (WebView)
+    app = KlayinesApp('Klayines', 'com.klayines')
+    return app.main_loop()
