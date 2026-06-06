@@ -1,0 +1,17 @@
+[project]
+name = "Klayines"
+version = "1.0"
+license = "MIT"
+
+[tool.briefcase]
+project_name = "Klayines"
+bundle = "com.klayines"
+
+[tool.briefcase.app.Klayines]
+formal_name = "Klayines"
+description = "P2P Messenger"
+sources = ["src/Klayines"]
+requires = ["requests", "flask"]
+
+[tool.briefcase.app.Klayines.android]
+runtime_version = "3.10"
